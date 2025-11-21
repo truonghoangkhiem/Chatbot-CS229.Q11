@@ -56,6 +56,10 @@ s(what(lam('X', ten(Entity, 'X')))) --> np(NPSem), [ten, la], [gi], {
     NPSem = lam(_, app(_, Entity))
 }.
 
+% "con cho ten gi?" -> The dog's name is what?
+% Semantics: λX.∃Y[cho(Y) ∧ ten(Y,X)] - What X such that exists Y where Y is a dog and Y's name is X
+s(what(lam('X', conj([cho('Y'), ten('Y', 'X')])))) --> [con, cho], [ten], [gi].
+
 opt_khong --> [khong] ; [].
 
 % ============================================
@@ -67,6 +71,9 @@ np(Sem) --> [Word], {
     member(Word, [huy, gau]),
     lexicon:noun_sem(Word, Sem)
 }.
+
+% Determiner + Common Noun: "con cho"
+np(lam('P', drs(['Y'], [cho('Y'), app('P', 'Y')]))) --> [con, cho].
 
 % ============================================
 % VERB PHRASES WITH LAMBDA SEMANTICS

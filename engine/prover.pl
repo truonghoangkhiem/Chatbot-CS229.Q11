@@ -35,7 +35,7 @@ prove_conditions([Cond|Rest]) :-
 
 % Prove a single condition
 prove_single_condition(conj(Conditions)) :- !,
-    % Conjunction - prove all conditions
+    % Conjunction - prove all conditions in the list
     prove_conditions(Conditions).
 
 prove_single_condition(type(Entity, Type)) :- !,

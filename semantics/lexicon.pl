@@ -104,12 +104,18 @@ substitute(Var, Value, drs(Universe, Conditions), drs(Universe, NewConditions)) 
     !,
     maplist(substitute_in_condition(Var, Value), Conditions, NewConditions).
 
+% Substitute in conj (conjunction)
+substitute(Var, Value, conj(Conditions), conj(NewConditions)) :-
+    !,
+    maplist(substitute(Var, Value), Conditions, NewConditions).
+
 % Substitute in compound terms (predicates with arguments)
 substitute(Var, Value, Term, NewTerm) :-
     compound(Term),
     Term \= lam(_, _),
     Term \= app(_, _),
     Term \= drs(_, _),
+    Term \= conj(_),
     !,
     Term =.. [Functor|Args],
     maplist(substitute(Var, Value), Args, NewArgs),
@@ -182,6 +188,10 @@ resolve_drs(drs(U, Conditions), drs(NewU, FinalConditions)) :-
 resolve_condition(app(Func, Arg), Resolved) :-
     !,
     beta_reduce(app(Func, Arg), Resolved).
+
+resolve_condition(conj(Conditions), conj(ResolvedConditions)) :-
+    !,
+    maplist(resolve_condition, Conditions, ResolvedConditions).
 
 resolve_condition(Condition, Condition).
 
