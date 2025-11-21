@@ -12,8 +12,7 @@ fact(ten(gau, gau)).                 % Tên là "Gấu" (đặt atom 'gau' để
 fact(mau_long(gau, nau)).            % Bộ lông màu nâu
 fact(hien(gau)).                     % Gấu hiền
 fact(dat(huy, gau)).                 % Huy dắt Gấu
-fact(thich(gau, huy)).               % Gấu thích Huy
 fact(thich(huy, gau)).               % Huy thích Gấu
 
 % ===== Luật thế giới (để trống tạm) =====
-world_rule(_):- fail.
+world_rule(thich(X,Y)) :- fact(thich(Y,X)).
