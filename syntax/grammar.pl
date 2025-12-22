@@ -2,7 +2,7 @@
 :- use_module('../semantics/lexicon').
 :- set_prolog_flag(double_quotes, chars).
 
-% --- Tokenizer tối giản
+% --- Tokenizer
 tokens(String, Tokens) :-
     split_string(String, " ", "?!.,", Words),
     exclude(=(""), Words, Ws),
@@ -10,111 +10,109 @@ tokens(String, Tokens) :-
     maplist(atom_string, Tokens, Ls).
 
 % ============================================
-% SENTENCE STRUCTURE WITH SEMANTIC COMPOSITION
+% 1. SENTENCE STRUCTURE
 % ============================================
 
 % --- YES/NO QUESTIONS ---
-% S -> NP VP (opt 'khong')
-% Semantics: Apply NP to VP using beta reduction
-% NP: \P.P(entity), VP: \X.predicate(X)
-% Result: (\P.P(entity))(\X.predicate(X)) -> predicate(entity)
 s(yn(Sem)) --> np(NPSem), vp(VPSem), opt_khong, {
     lexicon:apply(NPSem, VPSem, ReducedSem),
     lexicon:beta_reduce(ReducedSem, Sem)
 }.
 
-% --- WH-QUESTIONS ---
-% "Ai dat Gau?" -> Who dắt Gấu?
-% Semantics: Question word takes VP as argument
+% --- WHO QUESTIONS ---
 s(who(Sem)) --> [ai], vp(VPSem), {
     lexicon:question_word_sem(ai, QSem),
     lexicon:apply(QSem, VPSem, ReducedSem),
     lexicon:beta_reduce(ReducedSem, Sem)
 }.
 
-% "Huy co gi?" -> Huy has what?
+s(who(Sem)) --> [ai], v_tv(VerbSem), np(ObjSem), {
+    ( ObjSem = lam(_, app(_, Entity)) -> TrueObj = Entity ; TrueObj = 'Unknown' ),
+    lexicon:apply(VerbSem, TrueObj, VP),
+    lexicon:question_word_sem(ai, QSem),
+    lexicon:apply(QSem, VP, ReducedSem),
+    lexicon:beta_reduce(ReducedSem, Sem)
+}.
+
+% --- WHAT QUESTIONS ---
+
+% "Huy co gi?"
 s(what(lam('X', FinalPred))) --> np(NPSem), v_tv(VerbSem), [gi], {
-    % Extract entity from NP: Huy -> huy
-    NPSem = lam(_, app(_, Entity)),
-    % Extract predicate from verb: co -> \Y.\X.co(X,Y)
-    VerbSem = lam(_, lam(_, Predicate)),
-    % Substitute X (subject) with Entity: co(X,Y) -> co(huy,Y)
-    lexicon:substitute('X', Entity, Predicate, Pred1),
-    % Substitute Y (object) with 'X' (the question variable): co(huy,Y) -> co(huy,'X')
-    lexicon:substitute('Y', 'X', Pred1, FinalPred)
+    NPSem = lam(_, app(_, Entity)),         
+    VerbSem = lam(_, lam(_, Predicate)),    
+    lexicon:substitute('X', Entity, Predicate, P1), 
+    lexicon:substitute('Y', 'X', P1, FinalPred)     
 }.
 
-% "Long cua Gau mau gi?" -> Gấu's fur what color?
-s(what(lam('X', mau_long(Entity, 'X')))) --> [long, cua], np(NPSem), [mau], [gi], {
-    % Extract entity from NP
+% "Con cho ten gi?" -> FIX LỖI TẠI ĐÂY (Dùng biến 'X' thay vì 'Name')
+s(what(Sem)) --> np(NPSem), [ten], opt_la, [gi], {
+    % Tạo hàm lambda: \E.ten(E, X)
+    VerbLambda = lam('E', ten('E', 'X')),
+    
+    % Áp dụng NP vào hàm này
+    lexicon:apply(NPSem, VerbLambda, BodyDRS),
+    
+    % Kết quả: \X.BodyDRS
+    Sem = lam('X', BodyDRS)
+}.
+
+% "Long cua Gau mau gi?"
+s(what(lam('Y', mau_long(Entity, 'Y')))) --> 
+    [long, cua], np(NPSem), [mau, gi], {
     NPSem = lam(_, app(_, Entity))
 }.
-
-% "Gau ten la gi?" -> Gấu's name is what?
-s(what(lam('X', ten(Entity, 'X')))) --> np(NPSem), [ten, la], [gi], {
-    % Extract entity from NP
-    NPSem = lam(_, app(_, Entity))
-}.
-
-% "con cho ten gi?" -> The dog's name is what?
-% Semantics: λX.∃Y[cho(Y) ∧ ten(Y,X)] - What X such that exists Y where Y is a dog and Y's name is X
-s(what(lam('X', conj([cho('Y'), ten('Y', 'X')])))) --> [con, cho], [ten], [gi].
 
 opt_khong --> [khong] ; [].
+opt_la --> [la] ; [].
 
 % ============================================
-% NOUN PHRASES WITH LAMBDA SEMANTICS
+% 2. NOUN PHRASES (KHỬ ĐỆ QUY TRÁI)
 % ============================================
 
-% Proper nouns: \P.P(entity)
-np(Sem) --> [Word], {
-    member(Word, [huy, gau]),
-    lexicon:noun_sem(Word, Sem)
-}.
+np(Sem) --> np_base(BaseSem), np_extend(BaseSem, Sem).
 
-% Determiner + Common Noun: "con cho"
-np(lam('P', drs(['Y'], [cho('Y'), app('P', 'Y')]))) --> [con, cho].
+% --- Base ---
+np_base(Sem) --> [Word], { member(Word, [huy, gau]), lexicon:noun_sem(Word, Sem) }.
+np_base(Sem) --> common_noun(Sem).
+np_base(lam('P', drs(['Y'], [cho('Y'), app('P', 'Y')]))) --> [con, cho].
+np_base(lam('X', long('X'))) --> [long].
+
+% --- Extension (Đệ quy phải) ---
+np_extend(S, S) --> [].
+np_extend(HeadSem, FinalSem) --> 
+    [cua], np(ModifierSem), 
+    {
+        CombinedSem = lam('X', conj([
+            app(HeadSem, 'X'), 
+            app(ModifierSem, lam('M', cua('X', 'M')))
+        ]))
+    },
+    np_extend(CombinedSem, FinalSem).
 
 % ============================================
-% VERB PHRASES WITH LAMBDA SEMANTICS
+% 3. VERB PHRASES
 % ============================================
 
-% Intransitive VP: \X.predicate(X)
 vp(Sem) --> v_iv(Sem).
-
-% Adjective as predicate: \X.property(X)
 vp(Sem) --> adj(Sem).
 
-% Transitive VP: Verb + Object (proper noun)
-% Simple approach: extract entity from proper noun and substitute
-vp(lam('X', SubstitutedPred)) --> v_tv(lam('Y', lam('X', Predicate))), [Word], {
-    member(Word, [huy, gau]),
-    lexicon:substitute('Y', Word, Predicate, SubstitutedPred)
+vp(Sem) --> v_tv(VerbSem), np(ObjSem), {
+    ( ObjSem = lam(_, app(_, Entity)) ->
+        lexicon:apply(VerbSem, Entity, ReducedSem),
+        lexicon:beta_reduce(ReducedSem, Sem)
+    ; ObjSem = lam(Var, Prop) ->
+        VerbSem = lam('Y', lam('X', AtomicPred)), 
+        ObjVar = 'Obj', SubjVar = 'Subj',
+        lexicon:substitute('Y', ObjVar, AtomicPred, P1),
+        lexicon:substitute('X', SubjVar, P1, FinalPred),
+        lexicon:substitute(Var, ObjVar, Prop, SubstProp),
+        Sem = lam(SubjVar, drs([ObjVar], [SubstProp, FinalPred]))
+    ;
+        Sem = lam('X', fail)
+    )
 }.
 
-% Transitive VP with common noun: "co cho" (has dog)
-% Simple direct semantics: \X.[co(X,Y) & cho(Y)] where Y is a new variable
-% Use atoms for variable names instead of Prolog variables
-vp(lam('X', conj([co('X', 'Y'), cho('Y')]))) --> [co], [cho].
-
-% ============================================
-% LEXICAL CATEGORIES
-% ============================================
-
-% --- Transitive Verbs ---
-v_tv(Sem) --> [co], { lexicon:verb_tv_sem(co, Sem) }.
-v_tv(Sem) --> [dat], { lexicon:verb_tv_sem(dat, Sem) }.
-v_tv(Sem) --> [thich], { lexicon:verb_tv_sem(thich, Sem) }.
-
-% --- Intransitive Verbs ---
-v_iv(Sem) --> [hien], { lexicon:verb_iv_sem(hien, Sem) }.
-v_iv(Sem) --> [nho], { lexicon:verb_iv_sem(nho, Sem) }.
-v_iv(Sem) --> [lon], { lexicon:verb_iv_sem(lon, Sem) }.
-
-% --- Adjectives ---
-adj(Sem) --> [hien], { lexicon:adj_sem(hien, Sem) }.
-adj(Sem) --> [nho], { lexicon:adj_sem(nho, Sem) }.
-
-% --- Common Nouns ---
-common_noun(Sem) --> [cho], { lexicon:noun_sem(cho, Sem) }.
-common_noun(Sem) --> [nguoi], { lexicon:noun_sem(nguoi, Sem) }.
+v_tv(Sem) --> [Word], { member(Word, [co, dat, thich]), lexicon:verb_tv_sem(Word, Sem) }.
+v_iv(Sem) --> [Word], { member(Word, [hien, nho, lon]), lexicon:verb_iv_sem(Word, Sem) }.
+adj(Sem)  --> [Word], { member(Word, [hien, nho, lon]), lexicon:adj_sem(Word, Sem) }.
+common_noun(Sem) --> [Word], { member(Word, [cho, nguoi]), lexicon:noun_sem(Word, Sem) }.
