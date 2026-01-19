@@ -2,7 +2,7 @@
 :- use_module('../semantics/lexicon').
 :- set_prolog_flag(double_quotes, chars).
 
-% --- Tokenizer
+% --- Tokenizer ---
 tokens(String, Tokens) :-
     split_string(String, " ", "?!.,", Words),
     exclude(=(""), Words, Ws),
@@ -35,8 +35,6 @@ s(who(Sem)) --> [ai], v_tv(VerbSem), np(ObjSem), {
 }.
 
 % --- WHAT QUESTIONS ---
-
-% "Huy co gi?"
 s(what(lam('X', FinalPred))) --> np(NPSem), v_tv(VerbSem), [gi], {
     NPSem = lam(_, app(_, Entity)),         
     VerbSem = lam(_, lam(_, Predicate)),    
@@ -44,40 +42,45 @@ s(what(lam('X', FinalPred))) --> np(NPSem), v_tv(VerbSem), [gi], {
     lexicon:substitute('Y', 'X', P1, FinalPred)     
 }.
 
-% "Con cho ten gi?" -> FIX LỖI TẠI ĐÂY (Dùng biến 'X' thay vì 'Name')
 s(what(Sem)) --> np(NPSem), [ten], opt_la, [gi], {
-    % Tạo hàm lambda: \E.ten(E, X)
     VerbLambda = lam('E', ten('E', 'X')),
-    
-    % Áp dụng NP vào hàm này
     lexicon:apply(NPSem, VerbLambda, BodyDRS),
-    
-    % Kết quả: \X.BodyDRS
     Sem = lam('X', BodyDRS)
 }.
 
-% "Long cua Gau mau gi?"
 s(what(lam('Y', mau_long(Entity, 'Y')))) --> 
     [long, cua], np(NPSem), [mau, gi], {
     NPSem = lam(_, app(_, Entity))
+}.
+
+% [NEW] Cấu trúc câu trần thuật (Declarative) dùng cho ngữ cảnh
+% Ví dụ: "Huy có một con chó"
+s(decl(Sem)) --> np(NPSem), vp(VPSem), {
+    lexicon:apply(NPSem, VPSem, ReducedSem),
+    lexicon:beta_reduce(ReducedSem, Sem)
 }.
 
 opt_khong --> [khong] ; [].
 opt_la --> [la] ; [].
 
 % ============================================
-% 2. NOUN PHRASES (KHỬ ĐỆ QUY TRÁI)
+% 2. NOUN PHRASES
 % ============================================
 
 np(Sem) --> np_base(BaseSem), np_extend(BaseSem, Sem).
 
 % --- Base ---
 np_base(Sem) --> [Word], { member(Word, [huy, gau]), lexicon:noun_sem(Word, Sem) }.
+np_base(Sem) --> [no], { lexicon:noun_sem(no, Sem) }. % [NEW] Đại từ 'nó'
 np_base(Sem) --> common_noun(Sem).
+
+% [NEW] "một con chó" -> tạo DRS tồn tại: \P.drs([X], [cho(X), P(X)])
+np_base(lam('P', drs(['X'], [app(NounSem, 'X'), app('P', 'X')]))) --> 
+    [mot], [con], common_noun(NounSem).
 np_base(lam('P', drs(['Y'], [cho('Y'), app('P', 'Y')]))) --> [con, cho].
 np_base(lam('X', long('X'))) --> [long].
 
-% --- Extension (Đệ quy phải) ---
+% --- Extension ---
 np_extend(S, S) --> [].
 np_extend(HeadSem, FinalSem) --> 
     [cua], np(ModifierSem), 
@@ -96,17 +99,40 @@ np_extend(HeadSem, FinalSem) -->
 vp(Sem) --> v_iv(Sem).
 vp(Sem) --> adj(Sem).
 
+% Rule đặc biệt cho "có một con chó" - phải đặt TRƯỚC rule tổng quát
+vp(Sem) --> v_tv(VerbSem), [mot, con, cho], {
+    % Verb: \Y.\X.co(X,Y)
+    % VP: \X.drs([Z], [cho(Z), co(X,Z)])
+    VerbSem = lam(YVar, lam(SubjVar, Pred)),
+    lexicon:substitute(YVar, 'Z', Pred, P1),
+    Sem = lam(SubjVar, drs(['Z'], [cho('Z'), P1]))
+}.
+
 vp(Sem) --> v_tv(VerbSem), np(ObjSem), {
-    ( ObjSem = lam(_, app(_, Entity)) ->
+    ( ObjSem = lam(_, app(_, Entity)), atom(Entity), Entity \= 'REF' ->
+        % Case 1: Object là thực thể cụ thể (Gau, Huy)
         lexicon:apply(VerbSem, Entity, ReducedSem),
         lexicon:beta_reduce(ReducedSem, Sem)
-    ; ObjSem = lam(Var, Prop) ->
-        VerbSem = lam('Y', lam('X', AtomicPred)), 
-        ObjVar = 'Obj', SubjVar = 'Subj',
-        lexicon:substitute('Y', ObjVar, AtomicPred, P1),
-        lexicon:substitute('X', SubjVar, P1, FinalPred),
-        lexicon:substitute(Var, ObjVar, Prop, SubstProp),
-        Sem = lam(SubjVar, drs([ObjVar], [SubstProp, FinalPred]))
+    ; ObjSem = lam('P', drs([ObjVar], Conditions)) ->
+        % Case 2: Object là lượng từ (một con chó)
+        term_variables(Conditions, _),
+        lexicon:substitute('P', lam(ObjVar, 'PLACEHOLDER'), ObjSem, _),
+        
+        VerbSem = lam('Y', lam(SubjVar, Rel)),
+        lexicon:substitute('Y', ObjVar, Rel, RelWithObj),
+        Sem = lam(SubjVar, drs([ObjVar], [Conditions, RelWithObj]))
+    ; ObjSem = lam(_, app(_, 'REF')) ->
+        % Case 3: Object là đại từ (nó)
+        lexicon:apply(VerbSem, 'REF', ReducedSem),
+        lexicon:beta_reduce(ReducedSem, Sem)
+    ; ObjSem = lam(ObjVar, TypePred), \+ TypePred = app(_,_) ->
+        % Case 4: Object là common noun (cho, nguoi) - "Huy co cho"
+        % VerbSem = lam('Y', lam('X', co('X','Y')))
+        % Tạo DRS tồn tại: \X.drs([ObjY], [cho(ObjY), co(X, ObjY)])
+        VerbSem = lam(YVar, lam(SubjVar, Rel)),
+        lexicon:substitute(ObjVar, 'ObjY', TypePred, NewTypePred),
+        lexicon:substitute(YVar, 'ObjY', Rel, RelWithY),
+        Sem = lam(SubjVar, drs(['ObjY'], [NewTypePred, RelWithY]))
     ;
         Sem = lam('X', fail)
     )
@@ -114,5 +140,5 @@ vp(Sem) --> v_tv(VerbSem), np(ObjSem), {
 
 v_tv(Sem) --> [Word], { member(Word, [co, dat, thich]), lexicon:verb_tv_sem(Word, Sem) }.
 v_iv(Sem) --> [Word], { member(Word, [hien, nho, lon]), lexicon:verb_iv_sem(Word, Sem) }.
-adj(Sem)  --> [Word], { member(Word, [hien, nho, lon]), lexicon:adj_sem(Word, Sem) }.
+adj(Sem)  --> [Word], { member(Word, [hien, nho, lon, nau]), lexicon:adj_sem(Word, Sem) }.
 common_noun(Sem) --> [Word], { member(Word, [cho, nguoi]), lexicon:noun_sem(Word, Sem) }.

@@ -2,7 +2,7 @@
     noun_sem/2, verb_iv_sem/2, verb_tv_sem/2, adj_sem/2,
     question_word_sem/2,
     apply/3, beta_reduce/2, substitute/4,
-    sem_to_drs/2, resolve_drs/2
+    sem_to_drs/2, resolve_drs/2, replace_ref/4
 ]).
 
 % --- TỪ VỰNG LAMBDA ---
@@ -10,6 +10,9 @@ noun_sem(huy, lam('P', app('P', huy))).
 noun_sem(gau, lam('P', app('P', gau))).
 noun_sem(cho, lam('X', cho('X'))).
 noun_sem(nguoi, lam('X', nguoi('X'))).
+
+% [NEW] Đại từ 'nó' - Đóng vai trò là placeholder 'REF' sẽ được thay thế bởi ngữ cảnh
+noun_sem(no, lam('P', app('P', 'REF'))). 
 
 verb_iv_sem(hien, lam('X', hien('X'))).
 verb_iv_sem(nho, lam('X', nho('X'))).
@@ -22,6 +25,8 @@ verb_tv_sem(thich, lam('Y', lam('X', thich('X', 'Y')))).
 adj_sem(hien, lam('X', hien('X'))).
 adj_sem(nho, lam('X', nho('X'))).
 adj_sem(lon, lam('X', lon('X'))).
+% [FIX] Thêm tính từ màu nâu cho ví dụ trong báo cáo
+adj_sem(nau, lam('X', mau_long('X', nau))). 
 
 question_word_sem(ai, lam('P', drs(['X'], [type('X', nguoi), app('P', 'X')]))).
 question_word_sem(gi, lam('P', drs(['X'], [app('P', 'X')]))).
@@ -56,7 +61,6 @@ apply(F, A, R) :- beta_reduce(app(F, A), R).
 sem_to_drs(drs(U, C), drs(U, C)) :- !.
 sem_to_drs(Prop, drs([], [Prop])).
 
-% Helper: Chuyển đổi Atom Variable ('X') thành Prolog Variable (_G...)
 resolve_drs(drs(U, C), drs(NewU, FinalC)) :-
     maplist(resolve_cond, C, ReducedC),
     ( U == [] -> 
@@ -85,3 +89,7 @@ substitute_vars(Term, Pairs, NewTerm) :-
     maplist(substitute_vars_helper(Pairs), Args, NArgs), NewTerm =.. [F|NArgs].
 substitute_vars(T, _, T).
 substitute_vars_helper(P, A, NA) :- substitute_vars(A, P, NA).
+
+% [NEW] Hàm thay thế 'REF' bằng thực thể cụ thể (Resolution)
+replace_ref(Ref, Entity, Term, Result) :-
+    substitute(Ref, Entity, Term, Result).
